@@ -1,0 +1,799 @@
+---
+title: "Music data basic ETL"
+format: html
+---
+
+## Setup
+
+```{r}
+#| label: setup
+#| echo: false
+
+library(glue)
+library(lubridate)
+library(tidyverse)
+library(DBI)
+library(RPostgres)
+#
+con <- dbConnect(RPostgres::Postgres(),
+  dbname = "mbdump",
+  host = "localhost", port = 5432,
+  user = Sys.getenv("POSTGRES_USER"),
+  password = Sys.getenv("POSTGRES_PASSWORD")
+)
+dbListTables(conn = con)
+# dbDisconnect(con)
+```
+
+## Objective
+
+Drummers on: 
+- albums with any popular or critical success (according to various awards and lists);  
+- recordings with any popular or critical success;
+- my favourite albums and recordings.
+
+### Where to begin?
+Grammys and Junos, Billboard and Rolling Stone magazine, etc lists.
+
+### MusicBrainz
+
+In MusicBrainz, such lists are series.
+ 
+Rolling Stone best albums e.g. series id 11185 is series_type 47
+Rolling Stone best songs e.g. series id 14936 is series_type 3
+
+I.e. probably limit to entities in series where ((series_type includes 1-4 or 13) AND tolower(series_name) contains "best" or "greatest" or "most" or "billboard" or "grammy" or "juno") OR (series_type includes 14-48 AND tolower(series_name) does not contain "worst" or "anime expo anime music video" or "toast beard" or "brony" or "hatsune miku expo" or "classical" or "icma" or "classique" or "piano competition" or "cello competition" or "international competition for young pianists")
+
+```{r myseries}
+#| label: musicbrainz-series
+# library(musicbrainz)
+dbExecute(con, "
+SELECT id_series, series_name, series_comment, series_type_name,
+    series_type, ordering_type, entity_type, parent, child_order,
+    series_type_description
+    FROM myseries
+    WHERE (series_name LIKE '%Billboard%' or series_name LIKE '%Juno%' 
+        or series_name LIKE '%Grammy%'
+        or series_name LIKE '%Rolling Stone%' 
+        or series_comment LIKE '%SPIN magazine%' 
+        or series_name LIKE '%Academy Awards%'
+        or series_name LIKE '%Roll Hall of Fame%' 
+        or series_name LIKE 'Brit Award%') 
+      AND NOT entity_type = 'event'
+   ORDER BY entity_type, series_name;
+")
+myseries <- dbGetQuery(con, "
+SELECT id_series, series_name, series_comment, series_type_name,
+    series_type, ordering_type, entity_type, parent, child_order,
+    series_type_description
+    FROM myseries
+    WHERE (series_name LIKE '%Billboard%' or series_name LIKE '%Juno%' 
+        or series_name LIKE '%Grammy%'
+        or series_name LIKE '%Rolling Stone%' 
+        or series_comment LIKE '%SPIN magazine%' 
+        or series_name LIKE '%Academy Awards%'
+        or series_name LIKE '%Roll Hall of Fame%' 
+        or series_name LIKE 'Brit Award%') 
+      AND NOT entity_type = 'event'
+   ORDER BY entity_type, series_name;
+")
+
+table(myseries$entity_type, useNA = "ifany")
+
+# Recordings ------------------
+
+filter(myseries, entity_type == "recording") |> View()
+
+myrec <- dbGetQuery(con, "
+SELECT ms.id_series, ms.series_name, ms.series_comment,
+    ms.series_type_name, ms.series_type, ms.ordering_type, ms.entity_type,
+    ms.parent, ms.child_order, ms.series_type_description, lrs.link_order,
+    r.id AS recording_id, r.name AS recording_name,
+    r.artist_credit, ac.name AS artist_credit_name,
+    r.comment AS recording_comment
+    FROM myseries ms
+    LEFT JOIN l_recording_series lrs ON ms.id_series = lrs.entity1
+    LEFT JOIN recording r ON lrs.entity0 = r.id
+    LEFT JOIN artist_credit ac ON r.artist_credit = ac.id
+    WHERE ms.entity_type = 'recording'
+        AND (series_name LIKE '%Billboard%' or series_name LIKE '%Juno%' 
+        or series_name LIKE '%Grammy%'
+        or series_name LIKE '%Rolling Stone%' 
+        or series_comment LIKE '%SPIN magazine%' 
+        or series_name LIKE '%Academy Awards%'
+        or series_name LIKE '%Roll Hall of Fame%' 
+        or series_name LIKE 'Brit Award%') 
+        AND r.video = 'f';")
+
+filter(myseries, entity_type == "work") |> View()
+
+mywrk <- dbGetQuery(con, "
+SELECT ms.id_series, ms.series_name, ms.series_comment,
+ms.series_type_name, ms.series_type, ms.ordering_type, ms.entity_type,
+ms.parent, ms.child_order, ms.series_type_description, l.link_order,
+r.id AS work_id, r.name AS work_name,
+r.comment AS work_comment, r.type AS work_type
+FROM myseries ms
+LEFT JOIN l_series_work l ON ms.id_series = l.entity0
+LEFT JOIN work r ON l.entity1 = r.id
+WHERE ms.entity_type = 'work';")
+
+# Artists (in progress) ------------------
+filter(myseries, entity_type == "artist") |> View()
+
+mywrk <- dbGetQuery(con, "
+SELECT ms.id_series, ms.series_name, ms.series_comment,
+ms.series_type_name, ms.series_type, ms.ordering_type, ms.entity_type,
+ms.parent, ms.child_order, ms.series_type_description, l.link_order,
+r.id AS work_id, r.name AS work_name,
+r.comment AS work_comment, r.type AS work_type
+FROM myseries ms
+LEFT JOIN l_artist_series l ON ms.id_series = l.entity0
+LEFT JOIN work r ON l.entity1 = r.id
+WHERE ms.entity_type = 'artist';")
+
+
+
+myseries <- series |>
+  # Claude 3.5 Sonnet (Feb 7, 2025) suggestion
+  mutate(
+    del = case_when(
+      series_type %in% c(14, 15, 46, 47, 48) &
+        str_detect(
+          tolower(series_name),
+          "worst|anime expo anime music video|toast beard|brony|hatsune miku expo|classical|icma|classique|piano competition|cello competition|international competition for young pianists|artwork"
+        ) ~ 1,
+      series_type %in% c(1:4, 13) &
+        !str_detect(
+          tolower(series_name),
+          "best|greatest|most|billboard|grammy|juno"
+        ) ~ 1,
+      TRUE ~ 0
+    )
+  ) |>
+  filter(del == 0)
+
+table(myseries$series_type_name, myseries$entity_type,
+  useNA = "ifany"
+)
+# names(myseries)
+# myseries |> select(c(1:6, 10:12)) |>
+#     write_delim(, file = "./data/raw/myseries_noheaders.txt", delim = "\t",
+#                 col_names = FALSE
+#                 )
+
+dbWriteTable(con, "myseries", myseries)
+```
+
+
+
+
+## Completed materialized views 
+
+```{r, eval=FALSE}
+#| label: musicbrainz-series
+# library(musicbrainz)
+
+series <- dbGetQuery(con, "
+SELECT s.id AS id_series, s.gid AS gid_series, s.name AS series_name,
+         s.comment AS series_comment,  st.name AS series_type_name,
+		 s.type AS series_type, ordering_type,
+		 st.entity_type, st.parent, st.child_order,
+		 st.description AS series_type_decription
+FROM series s
+JOIN series_type st ON s.type = st.id
+WHERE s.type IN (1, 2, 3, 4, 13, 14, 15, 46, 47, 48);
+  ")
+
+myseries <- series |>
+  # Claude 3.5 Sonnet (Feb 7, 2025) suggestion
+  mutate(
+    del = case_when(
+      series_type %in% c(14, 15, 46, 47, 48) &
+        str_detect(
+          tolower(series_name),
+          "worst|anime expo anime music video|toast beard|brony|hatsune miku expo|classical|icma|classique|piano competition|cello competition|international competition for young pianists|artwork"
+        ) ~ 1,
+      series_type %in% c(1:4, 13) &
+        !str_detect(
+          tolower(series_name),
+          "best|greatest|most|billboard|grammy|juno"
+        ) ~ 1,
+      TRUE ~ 0
+    )
+  ) |>
+  filter(del == 0)
+
+table(myseries$series_type_name, myseries$entity_type,
+  useNA = "ifany"
+)
+# names(myseries)
+# myseries |> select(c(1:6, 10:12)) |>
+#     write_delim(, file = "./data/raw/myseries_noheaders.txt", delim = "\t",
+#                 col_names = FALSE
+#                 )
+
+dbWriteTable(con, "myseries", myseries)
+```
+
+### Next
+
+I want links of the type artist, recording, performer: filter link_type to get relevant link_type values in links table, then rows for those (link)IDs in l_artist_recording table.
+Where to get instrument artist played? link_attribute (for numeric code) and link_attribute_type (for description and hierarchy [vocal, instrument]).
+
+```{r}
+#| label: musicbrainz-links
+
+prefix <- "link"
+link <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(link) <- paste0(
+  prefix, "_",
+  c(
+    "id", "type",
+    "begin_date_year", "begin_date_month", "begin_date_day",
+    "end_date_year", "end_date_month", "end_date_day",
+    "attribute_count", "created", "ended"
+  )
+)
+dbWriteTable(con, "link", link)
+
+prefix <- "link_type"
+link_type <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(link_type) <- paste0(
+  prefix, "_",
+  c(
+    "id", "parent", "child_order", "gid",
+    "entity_type0", "entity_type1", "name",
+    "description", "link_phrase", "reverse_link_phrase",
+    "long_link_phrase", "last_updated", "is_deprecated",
+    "has_dates", "entity0_cardinality", "entity1_cardinality"
+  )
+)
+dbWriteTable(con, "link_type", link_type)
+```
+
+
+```{r}
+#| label: recording-series-relationships
+
+## an intermediate step to get recording titles of relevant type in
+## acclaimed series
+prefix <- "l_recording_series"
+l_recording_series <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(l_recording_series) <- paste0(
+  prefix, "_",
+  c(
+    "id", "link_id", "entity0", "entity1",
+    "edits_pending", "last_updated", "link_order",
+    "entity0_credit", "entity1_credit"
+  )
+)
+dbWriteTable(con, "l_recording_series", l_recording_series)
+
+## keep link type "part of"
+my_recording_series <- myseries |>
+  filter(series_type_entity_type == "recording") |>
+  left_join(l_recording_series,
+    by = c("series_id" = "l_recording_series_entity1")
+  ) |>
+  left_join(link, by = c("l_recording_series_link_id" = "link_id")) |>
+  left_join(link_type |> filter(link_type_id == 740),
+    by = c("link_type" = "link_type_id")
+  ) |>
+  select(
+    link_id = l_recording_series_link_id,
+    link_order = l_recording_series_link_order,
+    link_type, # link_type_has_dates, link_ended,
+    # link_begin_date_year, link_begin_date_month,
+    # link_begin_date_day, link_end_date_year, link_end_date_month,
+    # link_end_date_day,
+    link_type_name,
+    link_type_description, link_type_is_deprecated,
+    series_id, series_name, series_comment, series_type,
+    series_ordering_type, series_type_name, series_type_entity_type,
+    series_type_parent,
+    recording_id = l_recording_series_entity0
+    # , recording_credit = l_recording_series_entity0_credit
+  )
+```
+
+```{r}
+#| label: works-relationships
+
+## an intermediate step to get the 'work' data for recordings in
+## acclaimed series
+prefix <- "l_recording_work"
+l_recording_work <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(l_recording_work) <- paste0(
+  prefix, "_",
+  c(
+    "id", "link", "entity0", "entity1",
+    "edits_pending", "last_updated", "link_order",
+    "entity0_credit", "entity1_credit"
+  )
+)
+dbWriteTable(con, "l_recording_work", l_recording_work)
+
+## an intermediate step to get the artist-work links
+prefix <- "l_artist_work"
+l_artist_work <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(l_artist_work) <- paste0(
+  prefix, "_",
+  c(
+    "id", "link", "entity0", "entity1",
+    "edits_pending", "last_updated", "link_order",
+    "entity0_credit", "entity1_credit"
+  )
+)
+dbWriteTable(con, "l_artist_work", l_artist_work)
+```
+
+
+```{r}
+#| label: release-series-relationships
+
+## an intermediate step to get release titles of relevant type in
+## acclaimed series
+prefix <- "l_release_series"
+l_release_series <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+) |>
+  select(1:7)
+names(l_release_series) <- paste0(
+  prefix, "_",
+  c(
+    "id", "link_id", "entity0", "entity1",
+    "edits_pending", "last_updated", "link_order"
+    # , "entity0_credit", "entity1_credit"
+  )
+)
+dbWriteTable(con, "l_release_series", l_release_series)
+
+## keep link type "part of"
+my_release_series <- myseries |>
+  filter(series_type_entity_type == "release") |>
+  left_join(l_release_series,
+    by = c("series_id" = glue("{prefix}_entity1"))
+  ) |>
+  left_join(link, by = c("l_release_series_link_id" = "link_id")) |>
+  left_join(link_type |> filter(link_type_id == 741),
+    by = c("link_type" = "link_type_id")
+  ) |>
+  select(
+    # link_id = l_recording_series_link_id,
+    link_id = glue("{prefix}_link_id"),
+    link_order = glue("{prefix}_link_order"),
+    link_type, # link_type_has_dates, link_ended,
+    # link_begin_date_year, link_begin_date_month,
+    # link_begin_date_day, link_end_date_year, link_end_date_month,
+    # link_end_date_day,
+    link_type_name,
+    link_type_description, link_type_is_deprecated,
+    series_id, series_name, series_comment, series_type,
+    series_ordering_type, series_type_name, series_type_entity_type,
+    series_type_parent,
+    release_id = glue("{prefix}_entity0")
+    # , recording_credit = l_recording_series_entity0_credit
+  )
+```
+
+```{r}
+#| label: release-group-series-relationships
+
+## an intermediate step to get release titles of relevant type in
+## acclaimed series
+prefix <- "l_release_group_series"
+l_release_group_series <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+) |>
+  select(1:7)
+names(l_release_group_series) <- paste0(
+  prefix, "_",
+  c(
+    "id", "link_id", "entity0", "entity1",
+    "edits_pending", "last_updated", "link_order"
+    # , "entity0_credit", "entity1_credit"
+  )
+)
+dbWriteTable(con, "l_release_group_series", l_release_group_series)
+
+## keep link type "part of"
+my_release_group_series <- myseries |>
+  filter(series_type_entity_type == "release_group") |>
+  left_join(l_release_group_series,
+    by = c("series_id" = glue("{prefix}_entity1"))
+  ) |>
+  left_join(link, by = c("l_release_group_series_link_id" = "link_id")) |>
+  left_join(link_type |> filter(link_type_id == 742),
+    by = c("link_type" = "link_type_id")
+  ) |>
+  select(
+    # link_id = l_recording_series_link_id,
+    link_id = glue("{prefix}_link_id"),
+    link_order = glue("{prefix}_link_order"),
+    link_type, # link_type_has_dates, link_ended,
+    # link_begin_date_year, link_begin_date_month,
+    # link_begin_date_day, link_end_date_year, link_end_date_month,
+    # link_end_date_day,
+    link_type_name,
+    link_type_description, link_type_is_deprecated,
+    series_id, series_name, series_comment, series_type,
+    series_ordering_type, series_type_name, series_type_entity_type,
+    series_type_parent,
+    release_group_id = glue("{prefix}_entity0")
+    # , recording_credit = l_recording_series_entity0_credit
+  )
+```
+
+
+```{r}
+#| label: releases
+
+# Release groups --------------
+prefix <- "release_group"
+release_group <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(release_group) <- paste0(
+  prefix, "_",
+  c(
+    "id", "gid", "name", "artist_credit", "type", "comment",
+    "edits_pending", "last_updated"
+  )
+)
+
+# Will probably limit to album primary type (if needed)
+prefix <- "release_group_primary_type"
+release_group_type1 <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(release_group_type1) <- paste0(
+  prefix, "_",
+  c(
+    "id", "name", "parent", "child_order",
+    "description", "gid"
+  )
+)
+dbWriteTable(con, "release_group_type1", release_group_type1)
+
+# Will be nice to have labels like 'Compilation', 'Soundtrack', 'Live'
+prefix <- "release_group_secondary_type_join"
+release_group_type2join <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(release_group_type2join) <- c(
+  "release_group_id",
+  "release_group_secondary_type_id", "release_group_type2_created"
+)
+dbWriteTable(con, "release_group_type2join", release_group_type2join)
+
+prefix <- "release_group_secondary_type"
+release_group_type2 <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+) |>
+  select(c(1, 2, 5, 6))
+names(release_group_type2) <- paste0(
+  prefix, "_",
+  c("id", "name", "description", "gid")
+)
+dbWriteTable(con, "release_group_type2", release_group_type2)
+
+# Will be nice to have date of 1st release and release count
+prefix <- "release_group_meta"
+release_group_meta <- read_delim(
+  glue("~/data/musicbrainz/mbdump-derived/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(release_group_meta) <- c(
+  "release_group_id",
+  "release_count", "first_release_date_year", "first_release_date_month",
+  "first_release_date_day", "rating", "rating_count"
+)
+dbWriteTable(con, "release_group_meta", release_group_meta)
+
+# Releases -------------------
+prefix <- "release"
+release <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(release) <- paste0(
+  prefix, "_",
+  c(
+    "id", "gid", "name", "artist_credit", "group_id",
+    "status", "packaging", "language", "script", "barcode",
+    "comment", "edits_pending", "quality", "last_updated"
+  )
+)
+
+# Will be nice to have the label
+prefix <- "release_label"
+release_label <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(release_label) <- c(
+  "release_label_id", "release_id",
+  "label_id", "catalog_number", "last_update"
+)
+dbWriteTable(con, "release_label", release_label)
+
+prefix <- "label"
+record_label <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+names(record_label) <- paste0(
+  prefix, "_",
+  c(
+    "id", "gid", "name",
+    "begin_date_year", "begin_date_month", "begin_date_day",
+    "end_date_year", "end_date_month", "end_date_day",
+    "code", "type", "area",
+    "comment", "edits_pending", "last_updated", "ended"
+  )
+)
+dbWriteTable(con, "record_label", record_label)
+```
+
+```{r}
+#| label: recordings
+
+## LONG RUNNING -- VERY LARGE ##
+# prefix <- "recording"
+# recordings <- read_delim(
+#     glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+#     delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+#     col_names = FALSE, trim_ws = TRUE)
+# recordings_no_vid <- recordings |>
+#     filter(is.na(X9) | X9 == FALSE) |>
+#     select(1:6)
+# names(recordings_no_vid) <- paste0(prefix, "_",
+#         c("id", "gid", "name", "artist_credit", "length", "comment"))
+# saveRDS(recordings_no_vid,
+#         "./data/raw/musicbrainz_recordings_no_vid.Rds")
+# rm(recordings)
+recordings <- readRDS("./data/raw/musicbrainz_recordings_no_vid.Rds")
+
+
+prefix <- "track"
+track <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE, n_max = 20,
+  col_names = FALSE, trim_ws = TRUE
+)
+```
+
+### Get works, recordings, releases (groups) in my series
+
+```{r}
+#| label: series-song-album-details
+names(release_group)
+my_release_groups <- my_release_group_series |>
+  select(release_group_id) |>
+  distinct() |>
+  mutate(in_my_release_groups = 1) |>
+  left_join(release_group, by = "release_group_id")
+```
+
+
+
+
+
+
+
+```{r}
+#| label: Artists
+
+prefix <- "artist_credit"
+artist_credit <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+
+names(artist_credit) <- paste0(
+  prefix, "_",
+  c(
+    "id", "name", "artist_count", "ref_count", "created",
+    "edits_pending", "gid"
+  )
+)
+
+
+prefix <- "artist_credit_name"
+artist_credit_name <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+
+names(artist_credit_name) <- paste0(
+  prefix, "_",
+  c("artist_credit", "position", "artist", "name", "join_phrase")
+)
+
+prefix <- "artist_credit_name"
+artist_credit_name <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+
+names(artist_credit_name) <- paste0(
+  prefix, "_",
+  c("artist_credit", "position", "artist", "name", "join_phrase")
+)
+```
+
+```{r instruments}
+prefix <- "instrument"
+instrument <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+
+names(instrument) <- paste0(
+  prefix, "_",
+  c(
+    "id", "gid", "name", "type", "edits_pending", "last_updated",
+    "comment", "description"
+  )
+)
+
+prefix <- "instrument_type"
+instrument_type <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+
+names(instrument_type) <- paste0(
+  prefix, "_",
+  c(
+    "id", "gid", "name", "type", "edits_pending", "last_updated",
+    "comment", "description"
+  )
+)
+
+
+prefix <- "instrument_alias"
+instrument_alias <- read_delim(
+  glue("~/data/musicbrainz/mbdump/mbdump/{prefix}"),
+  delim = "\t", na = c("", "\\N"), escape_double = FALSE,
+  col_names = FALSE, trim_ws = TRUE
+)
+
+names(instrument_alias) <- paste0(
+  prefix, "_",
+  c(
+    "id", "gid", "name", "type", "edits_pending", "last_updated",
+    "comment", "description"
+  )
+)
+```
+
+
+
+
+## My important albums
+
+```{r my-albums}
+library(readxl)
+faves <- read_excel("data/processed/my_favourite_albums.xlsx")
+```
+
+
+
+## Other top album and song lists
+
+```{r}
+#| label: Spotify-diamond-albums
+spotify_diamond_songs <- read_csv(
+  "~/data/data science education/drummers/SpotifyDiamondAlbums.csv"
+  # some only have year to separate into year, month, day cols later
+  # , col_types = cols(release_date = col_date(format = "%Y-%m-%d"))
+)
+
+spotify_diamond_albums <- spotify_diamond_songs |>
+  select(album, all_artists, release_date) |>
+  distinct() |>
+  mutate(
+    release_year = str_sub(release_date, 1, 4),
+    release_month = str_sub(release_date, 6, 7),
+    release_day = str_sub(release_date, 9, 10)
+  )
+write_csv(
+  spotify_diamond_albums,
+  "data/processed/quick_spotify_diamond_albums.csv"
+)
+```
+
+```{r}
+#| label: billboard-albums
+bb_albums <- read_delim("~/data/data science education/drummers/musicoset_metadata/albums.csv",
+  delim = "\t"
+  # some only have year to separate into year, month, day cols later
+  # , col_types = cols(release_date = col_date(format = "%Y-%m-%d"))
+)
+
+bb_albums_pop <- read_delim("~/data/data science education/drummers/musicoset_popularity/album_pop.csv",
+  delim = "\t"
+  # some only have year to separate into year, month, day cols later
+  # , col_types = cols(release_date = col_date(format = "%Y-%m-%d"))
+)
+
+bb_artists <- read_delim("~/data/data science education/drummers/musicoset_metadata/artists.csv",
+  delim = "\t"
+  # some only have year to separate into year, month, day cols later
+  # , col_types = cols(release_date = col_date(format = "%Y-%m-%d"))
+)
+
+bb_artist_pop <- read_delim("~/data/data science education/drummers/musicoset_popularity/artist_pop.csv",
+  delim = "\t"
+  # some only have year to separate into year, month, day cols later
+  # , col_types = cols(release_date = col_date(format = "%Y-%m-%d"))
+)
+
+
+bb_songs <- read_delim("~/data/data science education/drummers/musicoset_metadata/songs.csv",
+  delim = "\t"
+  # some only have year to separate into year, month, day cols later
+  # , col_types = cols(release_date = col_date(format = "%Y-%m-%d"))
+)
+
+bb_song_pop <- read_delim("~/data/data science education/drummers/musicoset_popularity/song_pop.csv",
+  delim = "\t"
+  # some only have year to separate into year, month, day cols later
+  # , col_types = cols(release_date = col_date(format = "%Y-%m-%d"))
+)
+
+bb_tracks <- read_delim("~/data/data science education/drummers/musicoset_metadata/tracks.csv",
+  delim = "\t"
+  # some only have year to separate into year, month, day cols later
+  # , col_types = cols(release_date = col_date(format = "%Y-%m-%d"))
+)
+
+
+write_csv(
+  spotify_diamond_albums,
+  "data/processed/quick_spotify_diamond_albums.csv"
+)
+```

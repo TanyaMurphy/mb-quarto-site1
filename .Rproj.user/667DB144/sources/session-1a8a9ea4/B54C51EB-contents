@@ -1,0 +1,33 @@
+---
+title: "About"
+---
+
+## About this site
+
+This site is a collection of queries and analyses on the MusicBrainz database, focusing on drummers and their contributions to music that has received popular and critical acclaim. The data is sourced from [MusicBrainz](https://musicbrainz.org/doc/MusicBrainz_Database), a community-maintained open music encyclopedia that collects music metadata and makes it available to the public as relational tables.
+
+## Main queries
+
+Given the vast number of songs, albums, artists and related data catalogued by MusicBrainz, artists, albums, and songs are limited those linked to series that are popular and critical acclaim lists of music and artists. 
+My series were then further filtered to include only those related to major music awards and lists in the US, Canada, UK, and Australia. The inclusions and exclusions are somewhat arbitrary and you can help refine the definition of 'popular and critical acclaim' and the inclusion and exclusion criteria by submitting a [GitHub issue](). 
+
+```{sql, echo=TRUE, eval=FALSE}
+-- Create a materialized views for series that are popular and critical acclaim lists of music and artists 
+
+-- Further filter myseries to major US, Canada, UK and Australia music awards and lists
+CREATE MATERIALIZED VIEW myseries2 AS
+SELECT id_series, series_name, series_comment, series_type_name,
+    series_type, ordering_type, entity_type, parent, child_order,
+    series_type_description
+    FROM myseries
+    WHERE (series_name LIKE '%Billboard%' or series_name LIKE '%Juno%' 
+        or series_name LIKE '%Grammy%'
+        or series_name LIKE '%Rolling Stone%' 
+        or series_comment LIKE '%SPIN magazine%' 
+        or series_name LIKE '%Academy Awards%'
+        or series_name LIKE '%Roll Hall of Fame%' 
+        or series_name LIKE 'Brit Award%') 
+      AND NOT entity_type = 'event'
+   ORDER BY entity_type, series_name;
+
+```

@@ -1,0 +1,29 @@
+project:
+  type: website
+
+website:
+  title: "MusicBrainz data: a focus on drummers"
+  navbar:
+    left:
+      - text: "Home"
+        href: index.qmd
+      - text: "Series"
+        menu:
+          - text: "Artist Series"
+            href: R/artist_series.qmd 
+          - text: "Album Series"
+            href: R/album_series.qmd
+          - text: "Song Series"
+            href: R/recording_series.qmd
+      - text: "About"
+        href: R/about.qmd
+
+format:
+  html:
+    theme:
+      - lumen
+    css: styles.css
+    toc: true
+
+
+

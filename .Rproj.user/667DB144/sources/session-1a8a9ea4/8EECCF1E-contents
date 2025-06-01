@@ -1,0 +1,13 @@
+---
+title: "MusicBrainz data: a focus on drummers"
+---
+
+Discover the drummers who layed down the beat for music's best songs, albums, and artists.
+
+Database provided by [MusicBrainz](https://musicbrainz.org/).
+
+## Series: Popular and Critical Acclaim Lists
+
+```{r}
+1 + 1
+```
