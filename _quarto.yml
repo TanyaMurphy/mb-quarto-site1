@@ -1,5 +1,11 @@
 project:
   type: website
+  render:
+    - index.qmd
+    - R/artist_series.qmd
+    - R/album_series.qmd
+    - R/recording_series.qmd
+    - R/about.qmd
 
 website:
   title: "MusicBrainz data: a focus on drummers"
@@ -9,14 +15,10 @@ website:
         href: index.qmd
       - text: "Series"
         menu:
-          - text: "Artist Series"
-            href: R/artist_series.qmd 
-          - text: "Album Series"
-            href: R/album_series.qmd
-          - text: "Song Series"
-            href: R/recording_series.qmd
-      - text: "About"
-        href: R/about.qmd
+          - R/artist_series.qmd 
+          - R/album_series.qmd
+          - R/recording_series.qmd
+      - R/about.qmd
 
 format:
   html:

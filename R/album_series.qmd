@@ -1,0 +1,6 @@
+---
+title: "Albums in Popular and Critical Acclaim Lists (my filtered series)"
+format: html
+---
+
+In the years between 45s and streaming, albums were the primary way to consume music.

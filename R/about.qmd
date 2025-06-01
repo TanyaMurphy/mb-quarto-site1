@@ -1,5 +1,5 @@
 ---
-title: "about"
+title: "About"
 ---
 
 ## About this site
@@ -11,7 +11,7 @@ This site is a collection of queries and analyses on the MusicBrainz database, f
 Given the vast number of songs, albums, artists and related data catalogued by MusicBrainz, artists, albums, and songs are limited those linked to series that are popular and critical acclaim lists of music and artists. 
 My series were then further filtered to include only those related to major music awards and lists in the US, Canada, UK, and Australia. The inclusions and exclusions are somewhat arbitrary and you can help refine the definition of 'popular and critical acclaim' and the inclusion and exclusion criteria by submitting a [GitHub issue](). 
 
-```{sql, echo=TRUE, eval=FALSE}
+```
 -- Create a materialized views for series that are popular and critical acclaim lists of music and artists 
 
 -- Further filter myseries to major US, Canada, UK and Australia music awards and lists
