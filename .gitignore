@@ -5,7 +5,6 @@
 *.Rproj
 data/
 images/
-
 .quarto/
 _site/
-
+/.quarto/

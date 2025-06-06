@@ -1,0 +1,21 @@
+color:
+  palette: # Yellow Submarine
+    blue: "#596C8A"   # Payne's gray or United Nations Blue "#4A9BEE"?
+    pale-blue: "#596C8A50" # Payne's gray with 50% opacity
+    white: "#F5FFF7" # Mint cream
+    green: "#77D549"   # SGBUS green
+    purple: "#791B6F"      # Byzantium
+    orange: "#F7B52B"    # Xanthous
+    red: "#FD4129"  # Scarlet
+    black: "#230A17"  # Dark purple
+
+  primary: blue
+  secondary: pale-blue
+  success: green
+  info: purple
+  warning: orange
+  danger: red
+  light: white
+  dark: black
+  background: white
+  foreground: black

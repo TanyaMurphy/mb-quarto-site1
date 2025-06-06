@@ -9,11 +9,45 @@ This site is a collection of queries and analyses on the MusicBrainz database, f
 ## Main queries
 
 Given the vast number of songs, albums, artists and related data catalogued by MusicBrainz, artists, albums, and songs are limited those linked to series that are popular and critical acclaim lists of music and artists. 
-My series were then further filtered to include only those related to major music awards and lists in the US, Canada, UK, and Australia. The inclusions and exclusions are somewhat arbitrary and you can help refine the definition of 'popular and critical acclaim' and the inclusion and exclusion criteria by submitting a [GitHub issue](). 
+My series were then further filtered to include only those related to major music awards and lists in the US, Canada, UK, and Australia. The inclusions and exclusions are somewhat arbitrary and you can help refine the definition of 'popular and critical acclaim' and the inclusion and exclusion criteria by submitting a [GitHub issue](https://github.com/TanyaMurphy/mb-quarto-site1/issues). 
 
+### Recordings on albums (release and release groups)
+```sql
+ SELECT m.release AS release_id,
+    t.recording AS recording_id,
+    t.artist_credit,
+    t.length AS track_length,
+    t."position" AS track_position,
+    t.medium AS medium_id,
+    m."position" AS medium_position,
+    mf.name AS format_name
+   FROM medium_format mf
+     JOIN medium m ON m.format = mf.id
+     JOIN track t ON m.id::numeric = t.medium::numeric
+  WHERE ((mf.id = ANY (ARRAY[1, 8, 12, 73, 78])) OR (mf.parent = ANY (ARRAY[1, 7, 73]))) AND t.is_data_track = false
+  ORDER BY m.release;
 ```
+### Series: popular and critical acclaim lists of music and artists
+
+```sql
 -- Create a materialized views for series that are popular and critical acclaim lists of music and artists 
 
+-- myseries materialized view code
+SELECT s.id AS id_series,
+    s.gid AS gid_series,
+    s.name AS series_name,
+    s.comment AS series_comment,
+    st.name AS series_type_name,
+    s.type AS series_type,
+    s.ordering_type,
+    st.entity_type,
+    st.parent,
+    st.child_order,
+    st.description AS series_type_description
+   FROM series s
+     JOIN series_type st ON s.type = st.id
+  WHERE ((s.type = ANY (ARRAY[1, 2, 3, 4, 13])) AND (lower(s.name) ~~ '%best%'::text OR lower(s.name) ~~ '%greatest%'::text OR lower(s.name) ~~ '%most%'::text OR lower(s.name) ~~ '%billboard%'::text OR lower(s.name) ~~ '%grammy%'::text OR lower(s.name) ~~ '%juno%'::text OR lower(s.name) ~~ '%brit award%'::text) OR (s.type = ANY (ARRAY[14, 15, 46, 47, 48])) AND NOT (lower(s.name) ~~ '%worst%'::text OR lower(s.name) ~~ '%anime expo anime music video%'::text OR lower(s.name) ~~ '%toast beard%'::text OR lower(s.name) ~~ '%brony%'::text OR lower(s.name) ~~ '%hatsune miku expo%'::text OR lower(s.name) ~~ '%classical%'::text OR lower(s.name) ~~ '%icma%'::text OR lower(s.name) ~~ '%classique%'::text OR lower(s.name) ~~ '%piano competition%'::text OR lower(s.name) ~~ '%cello competition%'::text OR lower(s.name) ~~ '%international competition for young pianists%'::text OR lower(s.name) ~~ '%artwork%'::text OR lower(s.name) ~~ 'celestia radio%'::text OR lower(s.name) ~~ 'best of 2024%'::text OR lower(s.name) = 'best show gems'::text OR s.name = 'Billboard Hot 100: 2021-11-27'::text OR s.name = 'Billboard Hot 100: 2022-02-05'::text OR s.name = 'Cân i Gymru winners'::text OR s.name = 'Pitchfork: The 100 Best Songs of the 2020s So Far'::text OR lower(s.name) ~~ 'the 25 best k-pop%'::text OR s.name = 'The Best Show on WFMU'::text)) AND NOT (s.id = 10099 OR s.id = 10103 OR s.id = 10098 OR s.id = 10454 OR s.id = 13146 OR s.id = 14616 OR s.id = 14626 OR s.id = 10093 OR s.id = 10101 OR s.id = 10096 OR s.id = 20649 OR s.id = 27033 OR s.id = 10103 OR s.id = 21162 OR s.id = 21164 OR s.id = 21163 OR s.id = 21161 OR s.id = 10095 OR s.id = 10102 OR s.id = 10099 OR s.id = 10105 OR s.id = 10454 OR s.id = 10110 OR s.id = 20933 OR s.id = 10106 OR s.id = 10112 OR s.id = 13866 OR s.id = 10148 OR s.id = 10111 OR s.id = 10104 OR s.id = 10457 OR s.id = 10458 OR s.id = 10097 OR s.id = 27144 OR s.id = 16404 OR s.id = 16151 OR s.id = 16268 OR s.id = 11253 OR s.id = 13200 OR s.id = 25241 OR s.id = 15793 OR s.id = 25395 OR s.id = 26643 OR s.id = 23702 OR s.id = 21484 OR s.id = 23619 OR s.id = 22651 OR s.id = 22707 OR s.id = 11522 OR s.id = 21499 OR s.id = 22659 OR s.id = 11486 OR s.id = 21416 OR s.id = 22729 OR s.id = 26629 OR s.id = 22722 OR s.id = 19746 OR s.id = 22663 OR s.id = 26720 OR s.id = 18285 OR s.id = 17780 OR s.id = 5552 OR s.id = 25725 OR s.id = 24727 OR s.id = 22650 OR s.id = 25826 OR lower(s.name) ~~ '%barnas beste%'::text);
+  
 -- Further filter myseries to major US, Canada, UK and Australia music awards and lists
 CREATE MATERIALIZED VIEW myseries2 AS
 SELECT id_series, series_name, series_comment, series_type_name,
@@ -29,6 +63,7 @@ SELECT id_series, series_name, series_comment, series_type_name,
         or series_name LIKE 'Brit Award%') 
       AND NOT entity_type = 'event'
    ORDER BY entity_type, series_name;
-
+  
+  
 ```
 

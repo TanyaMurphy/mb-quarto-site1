@@ -9,15 +9,19 @@ project:
 
 website:
   title: "MusicBrainz data: a focus on drummers"
+  favicon: images/favicon.png
   navbar:
     left:
       - text: "Home"
         href: index.qmd
       - text: "Series"
         menu:
-          - R/artist_series.qmd 
-          - R/album_series.qmd
-          - R/recording_series.qmd
+          - text: "Artists"
+            href: R/artist_series.qmd 
+          - text: "Albums"
+            href: R/album_series.qmd
+          - text: "Songs"
+            href: R/recording_series.qmd
       - R/about.qmd
 
 format:
@@ -26,3 +30,5 @@ format:
       - lumen
     css: styles.css
     toc: true
+
+#brand: _brand.yml
